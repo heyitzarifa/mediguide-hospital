@@ -188,32 +188,7 @@ export const SmartCareAPI = {
     return { status: 'taken' };
   },
 
-  /** POST /medications/cross-check - Cross-check OCR medicines with Doctor Voice Instructions */
-  async crossCheckMedicines(ocrMedicines: any[], voiceTranscription: string): Promise<{ status: string; matches: any[]; warnings: any[] }> {
-    try {
-      const res = await fetch(`${BASE_URL}/medications/cross-check`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ ocrMedicines, voiceTranscription })
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend crossCheckMedicines fallback');
-    }
 
-    const matches: any[] = [];
-    const warnings: any[] = [];
-    for (const med of ocrMedicines) {
-      const name = med.name || med.medicine_name || '';
-      if (!name) continue;
-      if (voiceTranscription.toLowerCase().includes(name.toLowerCase().split(' ')[0])) {
-        matches.push({ medicine: name, message: `✓ ${name} confirmed in doctor's voice instructions.` });
-      } else {
-        warnings.push({ medicine: name, message: `⚠ ${name} is in prescription but not explicitly heard in doctor instructions. Verify with pharmacist.` });
-      }
-    }
-    return { status: 'completed', matches, warnings };
-  },
 
 
   /** GET /locations - Fetch all hospital locations */

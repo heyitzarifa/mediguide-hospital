@@ -181,8 +181,8 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           action: {
             type: 'navigate',
-            label: 'Open Navigation',
-            payload: { tab: 'navigation' }
+            label: 'Go to Patient Portal',
+            payload: { tab: 'patient-dashboard' }
           }
         }
       ]);
@@ -240,26 +240,26 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
           if (apts && apts.length > 0) {
             // Find the next upcoming/confirmed appointment
             const upcoming = apts.find(a =>
-              a.status === 'confirmed' || a.status === 'scheduled' || a.status === 'booked'
+              a.status === 'Confirmed' || a.status === 'Pending' || a.status === 'In-Progress'
             ) || apts[0];
             return {
               id: `msg-${Date.now()}`,
               sender: 'assistant',
-              text: `📅 Your appointment is with **${upcoming.doctor_name}** (${upcoming.department_name}) on **${upcoming.appointment_date}** at **${upcoming.appointment_time}**.\n\nStatus: ${(upcoming.status || 'Scheduled').toUpperCase()}`,
+              text: `📅 Your appointment is with **${upcoming.doctorName}** (${upcoming.departmentName}) on **${upcoming.appointmentDate}** at **${upcoming.appointmentTime}**.\n\nStatus: ${(upcoming.status || 'Scheduled').toUpperCase()}`,
               timestamp: ts,
               action: {
                 type: 'view_appointment',
-                label: '📋 View Appointment',
-                payload: { tab: 'patient' }
+                label: '📅 View All Appointments',
+                payload: { tab: 'patient-dashboard' }
               },
               cardData: {
-                title: upcoming.doctor_name || 'Your Doctor',
-                subtitle: upcoming.department_name || 'Department',
+                title: upcoming.doctorName || 'Your Doctor',
+                subtitle: upcoming.departmentName || 'Department',
                 details: [
-                  { label: 'Date', value: upcoming.appointment_date || '—' },
-                  { label: 'Time', value: upcoming.appointment_time || '—' },
+                  { label: 'Date', value: upcoming.appointmentDate || '—' },
+                  { label: 'Time', value: upcoming.appointmentTime || '—' },
                   { label: 'Status', value: upcoming.status?.toUpperCase() || 'Scheduled' },
-                  { label: 'Token', value: upcoming.token_number ? `#${upcoming.token_number}` : 'Not assigned yet' }
+                  { label: 'Token', value: (upcoming as any).token_number ? `#${(upcoming as any).token_number}` : 'Not assigned yet' }
                 ]
               }
             };
@@ -272,7 +272,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
               action: {
                 type: 'book_appointment',
                 label: '📅 Book an Appointment',
-                payload: { tab: 'patient', openBookingModal: true, departmentName: 'Cardiology' }
+                payload: { tab: 'patient-dashboard', openBookingModal: true, departmentName: 'Cardiology' }
               }
             };
           }
@@ -289,12 +289,12 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
         try {
           // Get patient's appointment dept first
           const apts = await SmartCareAPI.getPatientAppointments(token);
-          const dept = (apts && apts.length > 0) ? apts[0].department_name || 'Cardiology' : 'Cardiology';
+          const dept = (apts && apts.length > 0) ? apts[0].departmentName || 'Cardiology' : 'Cardiology';
           const queue = await SmartCareAPI.getQueuePrediction(dept);
-          const tokenNum = (apts && apts.length > 0 && apts[0].token_number) ? `#${apts[0].token_number}` : 'Not assigned yet';
+          const tokenNum = (apts && apts.length > 0 && (apts[0] as any).token_number) ? `#${(apts[0] as any).token_number}` : 'Not assigned yet';
           const ahead = queue.currentToken && tokenNum !== 'Not assigned yet'
             ? Math.max(0, parseInt(tokenNum.replace('#', ''), 10) - parseInt(String(queue.currentToken).replace('#', '').replace('A-', '').replace('B-', ''), 10))
-            : queue.patientsAhead ?? '—';
+            : queue.peopleAhead ?? '—';
           const eta = queue.estimatedWaitMinutes ?? '—';
 
           return {
@@ -398,7 +398,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
         action: {
           type: 'book_appointment',
           label: '📅 Book Appointment',
-          payload: { tab: 'patient', openBookingModal: true, departmentName: dept }
+          payload: { tab: 'patient-dashboard', openBookingModal: true, departmentName: dept }
         },
         cardData: {
           title: `Book ${dept} OPD`,
@@ -422,9 +422,9 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
           text: `🏥 **Visitor Information — ${hosp.name}**\n\n⏰ Visiting hours: ${info.visitingHours}\n🚗 Parking: ${info.parkingInfo}\n☕ Cafeteria: ${info.cafeteriaLocation}\n📶 WiFi: ${info.wifiDetails}`,
           timestamp: ts,
           action: {
-            type: 'view_visitor',
-            label: '👁️ Visitor Guide',
-            payload: { tab: 'visitor' }
+            type: 'navigate',
+            label: 'Open Visitor Guide',
+            payload: { tab: 'visitor-dashboard' }
           }
         };
       } catch (_) {}
@@ -438,9 +438,9 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
         text: `Welcome to the Staff Workflow. You can call the next patient token, assign doctors, and update queue statuses in the Staff Console.`,
         timestamp: ts,
         action: {
-          type: 'view_staff',
-          label: 'Open Staff Console',
-          payload: { tab: 'staff' }
+            type: 'navigate',
+            label: 'Open Staff Console',
+            payload: { tab: 'staff-dashboard' }
         }
       };
     }
@@ -453,9 +453,9 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
         text: `Operational Summary for ${hosp.name}: Real-time analytics, doctor utilization, and queue data available in the Management Portal.`,
         timestamp: ts,
         action: {
-          type: 'view_management',
+          type: 'navigate',
           label: 'Open Management Portal',
-          payload: { tab: 'management' }
+          payload: { tab: 'management-dashboard' }
         }
       };
     }

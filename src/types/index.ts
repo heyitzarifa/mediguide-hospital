@@ -338,6 +338,7 @@ export interface ChatAction {
     destinationId?: string;
     departmentName?: string;
     tab?: AppViewTab;
+    openBookingModal?: boolean;
   };
 }
 

@@ -88,7 +88,7 @@ const HospitalLandingRoute: React.FC<{
 function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAuthenticated } = useAuth();
+  useAuth();
 
   // The Header (authenticated nav) must NEVER appear on public routes,
   // regardless of whether the user is logged in.
