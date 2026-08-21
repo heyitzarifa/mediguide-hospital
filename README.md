@@ -1,30 +1,170 @@
-# React + TypeScript + Vite
+🏥 MediGuide Hospital
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+🌟 About the Project
 
-Currently, two official plugins are available:
+MediGuide Hospital is a smart hospital management and navigation platform designed to make healthcare services more accessible, organized, and user-friendly.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The platform connects patients, hospital staff, visitors, and management through a single digital system. It helps users navigate hospital facilities, manage appointments and queues, access prescriptions and medication information, and interact with hospital services through an intuitive interface.
 
-## React Compiler
+✨ Key Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+👤 Patient Services
 
-## Expanding the Oxlint configuration
+- Patient dashboard
+- Appointment management
+- Queue and token tracking
+- Prescription management
+- Medication records and reminders
+- Hospital navigation
+- Healthcare information access
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+👩‍⚕️ Staff Services
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+- Staff dashboard
+- Patient and queue management
+- Appointment information
+- Department and doctor information
+- Hospital operational updates
+
+🏥 Hospital Management
+
+- Hospital onboarding
+- Hospital information management
+- QR-based hospital identification
+- Department and doctor management
+- Operational alerts
+- Hospital settings
+
+🧭 Smart Hospital Navigation
+
+- Search hospital locations
+- Find departments and facilities
+- Floor-based navigation
+- Route calculation between hospital locations
+- Estimated walking distance and time
+
+🔐 Authentication & Roles
+
+The system supports role-based access for:
+
+- Patients
+- Staff
+- Visitors
+- Management
+
+🛠️ Tech Stack
+
+Frontend
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- React Router
+- Lucide React
+- Tesseract.js
+
+Backend
+
+- Python
+- Flask
+- Flask-CORS
+
+Database
+
+- MongoDB
+- PyMongo
+
+📂 Project Structure
+
+mediguide-hospital/
+├── backend/
+│   ├── app.py
+│   └── database.py
+├── public/
+├── src/
+├── index.html
+├── package.json
+├── tailwind.config.js
+├── vite.config.ts
+└── README.md
+
+🚀 Getting Started
+
+Frontend
+
+Clone the repository:
+
+git clone https://github.com/heyitzarifa/mediguide-hospital.git
+
+Navigate to the project:
+
+cd mediguide-hospital
+
+Install dependencies:
+
+npm install
+
+Start the development server:
+
+npm run dev
+
+Backend
+
+Navigate to the backend folder:
+
+cd backend
+
+Install the required Python dependencies and configure the MongoDB connection using environment variables.
+
+The backend uses Flask and connects to MongoDB through PyMongo.
+
+🔧 Environment Variables
+
+The backend uses environment variables for configuration.
+
+Example:
+
+MONGODB_URI=your_mongodb_connection_string
+DB_NAME=smartcare_db
+SECRET_KEY=your_secret_key
+FRONTEND_BASE_URL=http://localhost:5173
+
+Do not commit real credentials, API keys, database passwords, or secret keys to the repository.
+
+🎯 Project Goal
+
+The goal of MediGuide Hospital is to improve the hospital experience for patients, visitors, staff, and management by bringing important hospital services into one connected digital platform.
+
+Instead of relying on multiple disconnected processes, MediGuide provides a centralized interface for navigation, appointments, queues, prescriptions, medication reminders, hospital information, and management operations.
+
+🚀 Future Improvements
+
+- Real-time hospital notifications
+- Advanced appointment scheduling
+- Improved indoor navigation
+- Mobile application support
+- Enhanced AI-assisted healthcare support
+- More hospital integrations
+- Improved accessibility features
+- Real-time data synchronization
+
+👥 Team Members
+
+Team MediGuide
+
+- Arifa
+- Nabeela Fathima
+- Yogalakshmi
+
+🏆 Hackathon Project
+
+
+MediGuide Hospital was developed as a hackathon project with the goal of creating a practical, accessible, and technology-driven solution for modern hospital management and patient experience.
+
+---
+
+Built with ❤️ by Team MediGuide
   }
 }
 ```
