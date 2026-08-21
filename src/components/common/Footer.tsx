@@ -18,7 +18,7 @@ export const Footer: React.FC<FooterProps> = ({ onTabChange }) => {
               <div className="w-8 h-8 rounded-lg bg-teal-500 flex items-center justify-center text-slate-950 font-bold">
                 <Sparkles className="w-4 h-4 text-slate-950" />
               </div>
-              <span className="font-bold text-lg text-white">Smart<span className="text-teal-400">Care</span></span>
+              <span className="font-bold text-lg text-white">Medi<span className="text-teal-400">Guide</span></span>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed mb-4">
               AI-powered hospital indoor navigation, queue prediction, and patient assistant platform built for modern healthcare facilities.
@@ -71,13 +71,13 @@ export const Footer: React.FC<FooterProps> = ({ onTabChange }) => {
           <div>
             <h4 className="text-sm font-semibold text-white uppercase tracking-wider mb-3">Hackathon Note</h4>
             <p className="text-xs text-slate-400 leading-relaxed">
-              This frontend interface is part of the SmartCare team hackathon project. Frontend services are decoupled and ready for Flask API endpoint integration.
+              This frontend interface is part of the MediGuide team hackathon project. Frontend services are decoupled and ready for Flask API endpoint integration.
             </p>
           </div>
         </div>
 
         <div className="pt-6 border-t border-slate-800/80 text-center sm:flex sm:justify-between text-xs text-slate-500">
-          <p>© {new Date().getFullYear()} SmartCare Hospital System. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} MediGuide Hospital System. All rights reserved.</p>
           <p className="mt-2 sm:mt-0">Designed with React, TypeScript & Tailwind CSS</p>
         </div>
       </div>

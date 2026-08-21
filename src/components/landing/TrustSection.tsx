@@ -16,7 +16,7 @@ export const TrustSection: React.FC = () => {
                 Built for High-Stress Hospital Environments
               </h2>
               <p className="text-slate-300 text-xs sm:text-sm leading-relaxed max-w-2xl">
-                SmartCare combines high-contrast readable typography, accessible touch targets for patients of all ages, and low-latency client-side navigation maps.
+                MediGuide combines high-contrast readable typography, accessible touch targets for patients of all ages, and low-latency client-side navigation maps.
               </p>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-2">

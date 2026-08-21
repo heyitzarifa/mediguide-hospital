@@ -1,16 +1,26 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import type { User, UserRole } from '../../types';
-import { X, User as UserIcon, Lock, Mail, ArrowRight } from 'lucide-react';
+import { X, User as UserIcon, Lock, Mail, ArrowRight, Building2, ShieldCheck } from 'lucide-react';
 
 interface AuthModalProps {
   initialRole?: UserRole;
   initialMode?: 'login' | 'register';
   onClose: () => void;
   onSuccess?: (user: User) => void;
+  /** When opened from a hospital QR scan — scopes registration to this hospital */
+  hospitalId?: string;
+  hospitalName?: string;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ initialRole = 'PATIENT', initialMode = 'login', onClose, onSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({
+  initialRole = 'PATIENT',
+  initialMode = 'login',
+  onClose,
+  onSuccess,
+  hospitalId,
+  hospitalName
+}) => {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [selectedRole, setSelectedRole] = useState<UserRole>(initialRole);
@@ -21,6 +31,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ initialRole = 'PATIENT', i
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // If opened from a QR scan, hide the role picker — patients scan, not staff/management
+  const isHospitalScoped = !!hospitalId;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -29,7 +42,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ initialRole = 'PATIENT', i
     try {
       const loggedInUser = mode === 'login'
         ? await login(email, password)
-        : await register(name, email, password, selectedRole, department);
+        : await register(name, email, password, selectedRole, department, hospitalId);
 
       if (onSuccess) onSuccess(loggedInUser);
       onClose();
@@ -58,33 +71,52 @@ export const AuthModal: React.FC<AuthModalProps> = ({ initialRole = 'PATIENT', i
         {/* Header */}
         <div>
           <h2 className="text-2xl font-extrabold text-white">
-            Smart<span className="text-teal-400">Care</span> Authentication
+            Medi<span className="text-teal-400">Guide</span> Authentication
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             Role-based security system enforcing backend API permissions.
           </p>
         </div>
 
-        {/* Role Selector Tabs for Manual Login */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-bold text-slate-300">Select Operating Role:</label>
-          <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            {(['STAFF', 'PATIENT', 'VISITOR', 'MANAGEMENT'] as UserRole[]).map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => setSelectedRole(r)}
-                className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all ${
-                  selectedRole === r
-                    ? 'bg-teal-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {r}
-              </button>
-            ))}
+        {/* Hospital Context Badge — shown only when opened from a QR scan */}
+        {isHospitalScoped && hospitalName && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
+              <Building2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Verified Hospital Portal</span>
+              </div>
+              <p className="text-sm font-semibold text-white truncate mt-0.5">{hospitalName}</p>
+              <p className="text-[10px] text-slate-400 font-mono">ID: {hospitalId} · Registration scoped to this hospital</p>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Role Selector Tabs — hidden when hospital-scoped (patients scan QR codes) */}
+        {!isHospitalScoped && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-300">Select Operating Role:</label>
+            <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              {(['STAFF', 'PATIENT', 'VISITOR', 'MANAGEMENT'] as UserRole[]).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setSelectedRole(r)}
+                  className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all ${
+                    selectedRole === r
+                      ? 'bg-teal-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -111,7 +143,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ initialRole = 'PATIENT', i
                 </div>
               </div>
 
-              {selectedRole === 'STAFF' && (
+              {selectedRole === 'STAFF' && !isHospitalScoped && (
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1">Department</label>
                   <select
@@ -166,7 +198,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ initialRole = 'PATIENT', i
             disabled={loading}
             className="w-full py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-sm shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2"
           >
-            <span>{loading ? 'Authenticating...' : mode === 'login' ? `Sign In as ${selectedRole}` : `Create ${selectedRole} Account`}</span>
+            <span>
+              {loading
+                ? 'Authenticating...'
+                : mode === 'login'
+                ? `Sign In${isHospitalScoped ? '' : ` as ${selectedRole}`}`
+                : `Create ${isHospitalScoped ? 'Patient' : selectedRole} Account`}
+            </span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

@@ -8,12 +8,12 @@ export const ProblemSolution: React.FC = () => {
         
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto mb-14">
-          <h2 className="text-xs uppercase tracking-widest font-bold text-teal-400 mb-2">Hospital Challenges vs SmartCare Solution</h2>
+          <h2 className="text-xs uppercase tracking-widest font-bold text-teal-400 mb-2">Hospital Challenges vs MediGuide Solution</h2>
           <p className="text-3xl sm:text-4xl font-extrabold text-white">
             Designed to Solve Real Hospital Confusion
           </p>
           <p className="text-slate-400 mt-3 text-sm sm:text-base">
-            Patients and visitors spend an average of 18 minutes searching for departments in large multi-floor medical centers. SmartCare changes that.
+            Patients and visitors spend an average of 18 minutes searching for departments in large multi-floor medical centers. MediGuide changes that.
           </p>
         </div>
 
@@ -54,7 +54,7 @@ export const ProblemSolution: React.FC = () => {
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-teal-200">The SmartCare AI Experience</h3>
+                <h3 className="text-xl font-bold text-teal-200">The MediGuide AI Experience</h3>
                 <p className="text-xs text-teal-400">Guiding patients with precision technology</p>
               </div>
             </div>

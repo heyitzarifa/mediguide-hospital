@@ -4,7 +4,7 @@ import { SmartCareAPI } from '../services/api';
 
 interface AuthContextType extends AuthSession {
   login: (email: string, password: string) => Promise<User>;
-  register: (name: string, email: string, password: string, role: UserRole, department?: string) => Promise<User>;
+  register: (name: string, email: string, password: string, role: UserRole, department?: string, hospitalId?: string) => Promise<User>;
   logout: () => void;
 }
 
@@ -43,8 +43,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return res.user;
   };
 
-  const register = async (name: string, email: string, password: string, role: UserRole, department?: string): Promise<User> => {
-    const res = await SmartCareAPI.register(name, email, password, role, undefined, department);
+  const register = async (name: string, email: string, password: string, role: UserRole, department?: string, hospitalId?: string): Promise<User> => {
+    const effectiveHospitalId = hospitalId || localStorage.getItem('smartcare_hospital_id') || undefined;
+    const res = await SmartCareAPI.register(name, email, password, role, effectiveHospitalId, department);
     setToken(res.token);
     setUser(res.user);
     return res.user;

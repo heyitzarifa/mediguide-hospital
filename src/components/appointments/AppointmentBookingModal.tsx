@@ -224,7 +224,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                 Appointment Booked!
               </h3>
               <p className="text-xs text-slate-300">
-                Your appointment has been successfully recorded in the SmartCare system.
+                Your appointment has been successfully recorded in the MediGuide system.
               </p>
             </div>
 

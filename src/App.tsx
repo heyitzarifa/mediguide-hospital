@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom';
 import type { AppViewTab, UserRole, User } from './types';
 import { AuthProvider, useAuth } from './context/AuthContext';
+// useAuth is used in MainApp to suppress the Header on the public landing page while logged out
 import { Header } from './components/common/Header';
 import { Footer } from './components/common/Footer';
 import { LandingPage } from './pages/LandingPage';
@@ -68,7 +69,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children,
 
 const HospitalLandingRoute: React.FC<{
   onSelectHospital: (hosp: any) => void;
-  onOpenAuth: (role?: UserRole, mode?: 'login' | 'register') => void;
+  onOpenAuth: (role?: UserRole, mode?: 'login' | 'register', hospitalId?: string, hospitalName?: string) => void;
   onTabChange: (tab: AppViewTab) => void;
 }> = ({ onSelectHospital, onOpenAuth, onTabChange }) => {
   const { token } = useParams<{ token: string }>();
@@ -83,9 +84,19 @@ const HospitalLandingRoute: React.FC<{
   );
 };
 
+
 function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { isAuthenticated } = useAuth();
+
+  // The Header (authenticated nav) must NEVER appear on public routes,
+  // regardless of whether the user is logged in.
+  // Public routes: "/" (landing) and "/h/*" (hospital QR entry).
+  // All app routes (/patient, /staff, /navigation, /queue, etc.) show the header.
+  const isPublicRoute = location.pathname === '/' || location.pathname.startsWith('/h/');
+  const showHeader = !isPublicRoute;
+
 
   const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -98,6 +109,9 @@ function MainApp() {
 
   const [bookingModalDept, setBookingModalDept] = useState<string>('Cardiology');
   const [isBookingModalOpen, setIsBookingModalOpen] = useState<boolean>(false);
+  // Hospital context carried from QR scan → AuthModal
+  const [authHospitalId, setAuthHospitalId] = useState<string | undefined>(undefined);
+  const [authHospitalName, setAuthHospitalName] = useState<string | undefined>(undefined);
 
   const currentTab: AppViewTab = (() => {
     const path = location.pathname;
@@ -107,15 +121,15 @@ function MainApp() {
 
   useEffect(() => {
     const path = location.pathname;
-    let title = 'SmartCare — Hospital Indoor Navigation & Patient Platform';
-    if (path === '/navigation') title = 'SmartCare — Indoor Navigation';
-    else if (path === '/queue') title = 'SmartCare — OPD Queue Prediction';
-    else if (path === '/prescription') title = 'SmartCare — AI Prescription Reader';
-    else if (path === '/staff') title = 'SmartCare — Staff Console';
-    else if (path === '/patient') title = 'SmartCare — Patient Portal';
-    else if (path === '/visitor') title = 'SmartCare — Visitor Guide';
-    else if (path === '/management') title = 'SmartCare — Management Analytics';
-    else if (path.startsWith('/h/')) title = 'SmartCare — Hospital Portal';
+    let title = 'MediGuide — Hospital Indoor Navigation & Patient Platform';
+    if (path === '/navigation') title = 'MediGuide — Indoor Navigation';
+    else if (path === '/queue') title = 'MediGuide — OPD Queue Prediction';
+    else if (path === '/prescription') title = 'MediGuide — AI Prescription Reader';
+    else if (path === '/staff') title = 'MediGuide — Staff Console';
+    else if (path === '/patient') title = 'MediGuide — Patient Portal';
+    else if (path === '/visitor') title = 'MediGuide — Visitor Guide';
+    else if (path === '/management') title = 'MediGuide — Management Analytics';
+    else if (path.startsWith('/h/')) title = 'MediGuide — Hospital Portal';
 
     document.title = title;
   }, [location.pathname]);
@@ -126,9 +140,11 @@ function MainApp() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleOpenAuth = (role?: UserRole, mode?: 'login' | 'register') => {
+  const handleOpenAuth = (role?: UserRole, mode?: 'login' | 'register', hospitalId?: string, hospitalName?: string) => {
     if (role) setAuthInitialRole(role);
     setAuthInitialMode(mode || 'login');
+    setAuthHospitalId(hospitalId);
+    setAuthHospitalName(hospitalName);
     setIsAuthOpen(true);
   };
 
@@ -167,12 +183,14 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans antialiased selection:bg-teal-500 selection:text-white">
-      <Header
-        currentTab={currentTab}
-        onTabChange={handleTabChange}
-        onEmergencyClick={() => setIsEmergencyOpen(true)}
-        onOpenAuth={handleOpenAuth}
-      />
+      {showHeader && (
+        <Header
+          currentTab={currentTab}
+          onTabChange={handleTabChange}
+          onEmergencyClick={() => setIsEmergencyOpen(true)}
+          onOpenAuth={handleOpenAuth}
+        />
+      )}
 
       <main className="flex-1">
         <Routes>
@@ -242,14 +260,16 @@ function MainApp() {
         </Routes>
       </main>
 
-      <Footer onTabChange={handleTabChange} />
+      {!isPublicRoute && <Footer onTabChange={handleTabChange} />}
 
-      {/* AI SmartCare Chatbox layer */}
-      <AIChatbox
-        onNavigateToTab={handleNavigateFromChat}
-        activeHospitalId={activeHospitalId}
-        onHospitalChange={setActiveHospitalId}
-      />
+      {/* AI MediGuide Chatbox — only on authenticated app pages */}
+      {!isPublicRoute && (
+        <AIChatbox
+          onNavigateToTab={handleNavigateFromChat}
+          activeHospitalId={activeHospitalId}
+          onHospitalChange={setActiveHospitalId}
+        />
+      )}
 
       {/* App-level Appointment Booking Modal triggered by Chatbox or Patient Dashboard */}
       {isBookingModalOpen && (
@@ -278,7 +298,13 @@ function MainApp() {
         <AuthModal
           initialRole={authInitialRole}
           initialMode={authInitialMode}
-          onClose={() => setIsAuthOpen(false)}
+          hospitalId={authHospitalId}
+          hospitalName={authHospitalName}
+          onClose={() => {
+            setIsAuthOpen(false);
+            setAuthHospitalId(undefined);
+            setAuthHospitalName(undefined);
+          }}
           onSuccess={handleAuthSuccess}
         />
       )}

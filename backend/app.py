@@ -656,65 +656,334 @@ def update_queue():
 
 # ==================== PRESCRIPTION SCANNER APIs (PATIENT FACING) ====================
 
+# ── OCR helpers ──────────────────────────────────────────────────────────────
+
+def _load_tesseract():
+    """Import pytesseract and point it at the Windows default install path if needed."""
+    import pytesseract as _pt
+    import os
+    # Common Windows install path from UB-Mannheim installer
+    default_win_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    if os.name == 'nt' and os.path.isfile(default_win_path):
+        _pt.pytesseract.tesseract_cmd = default_win_path
+    return _pt
+
+
+def _preprocess_image(img):
+    """
+    Basic preprocessing to improve OCR accuracy on prescription photos:
+    - Convert to greyscale
+    - Increase contrast
+    - Binarize with a threshold
+    Returns a PIL Image ready for Tesseract.
+    """
+    from PIL import ImageOps, ImageFilter, ImageEnhance
+    # Greyscale
+    img = img.convert('L')
+    # Enhance contrast
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(2.0)
+    # Sharpen slightly
+    img = img.filter(ImageFilter.SHARPEN)
+    # Binarize (simple threshold at 140)
+    img = img.point(lambda p: 255 if p > 140 else 0)
+    return img
+
+
+def _compute_ocr_confidence(ocr_data: dict) -> float:
+    """
+    Compute an overall OCR confidence from pytesseract image_to_data() output.
+    Returns a float 0-100. Ignores words with conf == -1 (non-text blocks).
+    """
+    confs = [
+        int(c) for c in ocr_data.get('conf', [])
+        if str(c).lstrip('-').isdigit() and int(c) >= 0
+    ]
+    if not confs:
+        return 0.0
+    return round(sum(confs) / len(confs), 1)
+
+
+def _parse_medicines(raw_text: str, ocr_data: dict) -> list:
+    """
+    Parse raw OCR text into structured medicine entries using regex heuristics.
+    Returns a list of dicts matching ExtractedMedicine shape.
+
+    Strategy:
+    - Split text into lines; scan each line.
+    - A line is a candidate medicine line if it contains a capitalised word
+      (likely a drug name) and is NOT a common header/label word.
+    - From the line (and surrounding context) extract dosage, frequency,
+      duration patterns via regex.
+    - Confidence per medicine is computed from the OCR word confidences that
+      overlap with the matched text region.
+    """
+    medicines = []
+
+    # ── Pattern library ──
+    DOSAGE_PAT = re.compile(
+        r'\b(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?|tabs?|capsules?|caps?|drops?|puffs?|sprays?|patches?|sachets?)(?:/\d+\s*(?:mg|mcg|g|ml))?)\b',
+        re.IGNORECASE
+    )
+    FREQ_PAT = re.compile(
+        r'\b('
+        r'once\s+(?:a\s+)?daily|twice\s+(?:a\s+)?daily|three\s+times\s+(?:a\s+)?day|four\s+times\s+(?:a\s+)?day'
+        r'|od|bd|tds|qid|sos|prn'
+        r'|(?:every\s+\d+\s+hours?)'
+        r'|(?:\d+\s*[-–]\s*\d+\s*[-–]\s*\d+(?:\s*[-–]\s*\d+)?)'  # 1-0-1 pattern
+        r'|morning\s+and\s+evening|morning\s+and\s+night'
+        r'|at\s+bedtime|before\s+(?:bed|sleep)|at\s+night'
+        r'|with\s+(?:meals?|food|breakfast|lunch|dinner)'
+        r')\b',
+        re.IGNORECASE
+    )
+    DURATION_PAT = re.compile(
+        r'\b(\d+\s*(?:days?|weeks?|months?)|for\s+\d+\s*(?:days?|weeks?|months?))\b',
+        re.IGNORECASE
+    )
+    # Words that are definitely not medicine names
+    SKIP_WORDS = {
+        'prescription', 'rx', 'patient', 'name', 'date', 'doctor', 'dr', 'hospital',
+        'address', 'phone', 'age', 'sex', 'gender', 'weight', 'diagnosis',
+        'signature', 'signed', 'stamp', 'refill', 'dispense', 'qty', 'quantity',
+        'the', 'and', 'for', 'with', 'take', 'tablet', 'tablets', 'capsule',
+        'capsules', 'dose', 'dosage', 'instruction', 'note', 'morning', 'evening',
+        'night', 'food', 'water', 'before', 'after', 'daily', 'once', 'twice',
+    }
+    # A line that looks like it contains a drug name: starts with a capital letter
+    # and is at least 4 chars, not a pure number.
+    DRUG_CANDIDATE_PAT = re.compile(r'\b([A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})*)\b')
+
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+
+    # Build a word→confidence map from ocr_data for per-medicine scoring
+    word_confs: dict[str, list[int]] = {}
+    for word, conf in zip(ocr_data.get('text', []), ocr_data.get('conf', [])):
+        w = str(word).strip().lower()
+        c_val = int(conf) if str(conf).lstrip('-').isdigit() else -1
+        if w and c_val >= 0:
+            word_confs.setdefault(w, []).append(c_val)
+
+    def _word_conf(word: str) -> float:
+        """Return mean OCR confidence for a specific word, or 50 if unknown."""
+        wl = word.lower()
+        if wl in word_confs:
+            return sum(word_confs[wl]) / len(word_confs[wl])
+        return 50.0
+
+    seen_names: set = set()
+
+    for i, line in enumerate(lines):
+        # Look for candidate drug names on this line
+        matches = DRUG_CANDIDATE_PAT.findall(line)
+        if not matches:
+            continue
+
+        # Filter out skip words
+        candidates = [
+            m for m in matches
+            if m.lower().split()[0] not in SKIP_WORDS and len(m) >= 4
+        ]
+        if not candidates:
+            continue
+
+        # Take the longest candidate as the medicine name
+        med_name_raw = max(candidates, key=len)
+        if med_name_raw.lower() in seen_names:
+            continue
+        seen_names.add(med_name_raw.lower())
+
+        # Search this line + next 2 lines for dosage / freq / duration
+        context = ' '.join(lines[i:i+3])
+
+        dosage_m = DOSAGE_PAT.search(context)
+        freq_m   = FREQ_PAT.search(context)
+        dur_m    = DURATION_PAT.search(context)
+
+        dosage    = dosage_m.group(1) if dosage_m else 'not detected'
+        frequency = freq_m.group(1)   if freq_m   else 'not detected'
+        duration  = dur_m.group(1)    if dur_m    else 'not detected'
+
+        # Build full medicine name including dosage if found on same token
+        med_name = med_name_raw
+        if dosage_m and dosage_m.group(1).lower() in line.lower():
+            # dosage already attached in name text, keep as-is
+            pass
+
+        # Per-medicine confidence: mean of OCR confidences for all name words
+        name_words = med_name.split()
+        name_confs = [_word_conf(w) for w in name_words]
+        med_confidence = round(sum(name_confs) / len(name_confs)) if name_confs else 50
+
+        medicines.append({
+            'id': f'rx-m-{uuid.uuid4().hex[:6]}',
+            'name': med_name,
+            'dosage': dosage,
+            'frequency': frequency,
+            'timing': 'As directed',
+            'duration': duration,
+            'instructions': 'Verify with your pharmacist before use. Information extracted by OCR — requires manual verification.',
+            'purposeSummary': 'Extracted from uploaded prescription image.',
+            'confidenceScore': med_confidence
+        })
+
+    return medicines
+
+
+# DEPRECATED: /api/prescription/analyze is no longer the primary prescription flow.
+# The new flow is: browser Tesseract.js OCR -> POST /api/medications/extract -> POST /api/medications/confirm
+# This endpoint is kept for backwards compatibility only and should not be called by the frontend.
 @app.route('/api/prescription/analyze', methods=['POST'])
 def analyze_prescription():
-    data = request.json or {}
     user = get_current_user(request)
     patient_id = user['id'] if user else 'u-patient-1'
+    patient_name = user['name'] if user else 'Patient'
 
+    # ── 1. Validate uploaded file ────────────────────────────────────────────
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded. Send a multipart/form-data request with a "file" field.'}), 400
+
+    uploaded_file = request.files['file']
+    if not uploaded_file or uploaded_file.filename == '':
+        return jsonify({'error': 'Uploaded file is empty or has no filename.'}), 400
+
+    # Accept only image MIME types
+    allowed_mimes = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff'}
+    content_type = uploaded_file.content_type or ''
+    filename_lower = (uploaded_file.filename or '').lower()
+    allowed_exts = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff')
+    if content_type not in allowed_mimes and not any(filename_lower.endswith(e) for e in allowed_exts):
+        return jsonify({
+            'error': f'Uploaded file does not appear to be an image. Content-Type received: "{content_type}". '
+                     f'Please upload a JPEG, PNG, WebP, or similar image file.'
+        }), 400
+
+    # ── 2. Read image into memory (Pillow) ───────────────────────────────────
+    try:
+        from PIL import Image
+        import base64
+
+        img_bytes = uploaded_file.read()
+        img = Image.open(io.BytesIO(img_bytes))
+        img.verify()               # raises if file is corrupt
+        img = Image.open(io.BytesIO(img_bytes))   # re-open after verify
+    except Exception as e:
+        return jsonify({'error': f'Could not open uploaded file as an image: {str(e)}'}), 400
+
+    # ── 3. Build base64 data URL for the image preview ──────────────────────
+    #    This lets the frontend always show the REAL uploaded image.
+    ext = filename_lower.rsplit('.', 1)[-1] if '.' in filename_lower else 'jpg'
+    mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp',
+                'tif': 'image/tiff', 'tiff': 'image/tiff'}
+    img_mime = mime_map.get(ext, 'image/jpeg')
+    img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+    image_data_url = f"data:{img_mime};base64,{img_b64}"
+
+    # ── 4. Run Tesseract OCR ─────────────────────────────────────────────────
+    try:
+        pt = _load_tesseract()
+    except ImportError:
+        return jsonify({
+            'error': 'pytesseract is not installed on the server. Run: pip install pytesseract'
+        }), 500
+
+    tesseract_available = False
+    try:
+        pt.get_tesseract_version()
+        tesseract_available = True
+    except Exception:
+        pass
+
+    if not tesseract_available:
+        return jsonify({
+            'error': (
+                'Tesseract-OCR engine is not installed or not found on PATH. '
+                'On Windows: download and install from '
+                'https://github.com/UB-Mannheim/tesseract/wiki '
+                '(choose the 64-bit installer). '
+                'The default install path C:\\Program Files\\Tesseract-OCR\\ is checked automatically. '
+                'After installing, restart the Flask server.'
+            )
+        }), 500
+
+    try:
+        proc_img = _preprocess_image(img)
+        raw_text = pt.image_to_string(proc_img, config='--psm 6')
+        ocr_data = pt.image_to_data(proc_img, config='--psm 6', output_type=pt.Output.DICT)
+    except Exception as e:
+        return jsonify({'error': f'OCR processing failed: {str(e)}'}), 500
+
+    # ── 5. Compute overall confidence ────────────────────────────────────────
+    overall_confidence = _compute_ocr_confidence(ocr_data)
+
+    # ── 6. Parse medicines from OCR text ─────────────────────────────────────
+    medicines = _parse_medicines(raw_text, ocr_data)
+
+    # ── 7. Build response ────────────────────────────────────────────────────
     rx_id = f"rx-{uuid.uuid4().hex[:8]}"
-    image_url = data.get('imageUrl', 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=800&auto=format&fit=crop&q=80')
+
+    if medicines:
+        ai_overview = (
+            f"Extracted {len(medicines)} medication(s) from the uploaded prescription image "
+            f"with an overall OCR confidence of {overall_confidence}%. "
+            "All fields labeled 'not detected' require manual verification."
+        )
+        key_takeaways = [
+            f"{m['name']}: {m['dosage']} — {m['frequency']} for {m['duration']}"
+            for m in medicines
+        ]
+        lifestyle_advice = [
+            'Always verify extracted medicine names and dosages with your pharmacist.',
+            'Keep your prescription document for reference.'
+        ]
+        error_warning = None
+    else:
+        ai_overview = (
+            f"OCR ran but could not confidently identify any medication names in the uploaded image "
+            f"(overall confidence: {overall_confidence}%). "
+            "This may be because the image is too blurry, handwritten, or not a prescription."
+        )
+        key_takeaways = ['No medicines were extracted. Please verify manually.']
+        lifestyle_advice = [
+            'Try uploading a clearer, well-lit photo of the prescription.',
+            'Typed/printed prescriptions work better than handwritten ones.'
+        ]
+        error_warning = (
+            'Unable to confidently extract medicine information from this prescription. '
+            'Please upload a clearer image or verify the prescription manually.'
+        )
 
     rx_record = {
         'id': rx_id,
         'patient_id': patient_id,
-        'imageUrl': image_url,
-        'doctorName': 'Dr. Elizabeth Warren, MD',
-        'patientName': user['name'] if user else 'Alex Morgan',
+        'imageUrl': image_data_url,
+        'doctorName': 'Extracted from prescription',
+        'patientName': patient_name,
         'date': datetime.now().strftime('%Y-%m-%d'),
-        'ocrConfidence': 96,
-        'medicines': [
-            {
-                'id': 'rx-m1',
-                'name': 'Metformin 500mg (Glucophage)',
-                'dosage': '500 mg',
-                'frequency': 'Twice daily',
-                'timing': 'With breakfast and dinner',
-                'duration': '30 days',
-                'instructions': 'Take with food to minimize digestive discomfort.',
-                'purposeSummary': 'Helps regulate blood sugar levels for Type-2 Diabetes management.',
-                'confidenceScore': 98
-            },
-            {
-                'id': 'rx-m2',
-                'name': 'Atorvastatin 10mg',
-                'dosage': '10 mg',
-                'frequency': 'Once daily',
-                'timing': 'At bedtime',
-                'duration': '30 days',
-                'instructions': 'Take continuously every evening with water.',
-                'purposeSummary': 'Supports healthy lipid levels and vascular integrity.',
-                'confidenceScore': 95
-            }
-        ],
+        'ocrConfidence': overall_confidence,
+        'medicines': medicines,
+        'rawOcrText': raw_text,
         'aiExplanation': {
-            'overview': 'This prescription comprises 2 maintenance medications prescribed for blood glucose stabilization and cholesterol management.',
-            'keyTakeaways': [
-                'Take Metformin 500mg twice every day alongside your morning and evening meals.',
-                'Take Atorvastatin 10mg once every night before sleeping.'
-            ],
-            'lifestyleAdvice': [
-                'Keep a consistent daily meal schedule.',
-                'Engage in light 20-minute daily walking as recommended by your physician.'
-            ]
+            'overview': ai_overview,
+            'keyTakeaways': key_takeaways,
+            'lifestyleAdvice': lifestyle_advice
         },
-        'safetyDisclaimer': 'Prescription details are extracted from the uploaded image. Please verify the medicine, dosage, and instructions with your doctor or pharmacist before taking it.'
+        'safetyDisclaimer': (
+            'Prescription details are extracted from the uploaded image using OCR. '
+            'Always verify the medicine name, dosage, and instructions with your doctor or pharmacist before taking any medication.'
+        )
     }
+    if error_warning:
+        rx_record['error_warning'] = error_warning
 
+    # Save a lightweight record to DB (omit the large base64 image blob)
+    db_record = {k: v for k, v in rx_record.items() if k != 'imageUrl' and k != 'rawOcrText'}
+    db_record['imageUrl'] = '[base64-data-url]'
     db = get_db()
-    db.prescriptions.insert_one(rx_record)
+    db.prescriptions.insert_one(db_record)
 
-    return jsonify(clean_doc(rx_record))
+    return jsonify(rx_record)
 
 # ==================== APPOINTMENT BOOKING & MANAGEMENT APIs ====================
 
@@ -1256,32 +1525,95 @@ def get_patient_id_from_request(req, target_patient_id=None):
     return current_id if (user_role == 'PATIENT' or not target_patient_id) else target_patient_id
 
 def get_intake_times_from_freq(freq_str):
-    freq = (freq_str or "").lower()
-    if 'twice' in freq or '2 times' in freq or 'every 12' in freq:
+    """Map frequency string to scheduled intake times.
+    Handles both English phrases and Indian shorthand (OD, BD, TDS, QID, SOS, 1-0-1).
+    """
+    freq = (freq_str or "").lower().strip()
+
+    # Indian shorthand: 1-0-1, 1-1-1, 1-0-0, 0-0-1, 1-1-0, 0-1-1 dash patterns
+    # Format: morning-afternoon-night (1=take, 0=skip)
+    dash_m = re.match(r'^(\d)[\-\/](\d)[\-\/](\d)$', freq)
+    if dash_m:
+        times = []
+        if dash_m.group(1) != '0': times.append("08:00")
+        if dash_m.group(2) != '0': times.append("14:00")
+        if dash_m.group(3) != '0': times.append("20:00")
+        return times if times else ["08:00"]
+
+    # Indian abbreviations (case-insensitive already lowered)
+    if freq in ('bd', 'bid', 'b.d', 'b.i.d') or 'twice' in freq or '2 times' in freq or 'every 12' in freq:
         return ["08:00", "20:00"]
-    elif 'three' in freq or 'thrice' in freq or '3 times' in freq or 'every 8' in freq:
+    if freq in ('tds', 'tid', 't.d.s', 't.i.d') or 'three' in freq or 'thrice' in freq or '3 times' in freq or 'every 8' in freq:
         return ["08:00", "14:00", "20:00"]
-    elif 'four' in freq or '4 times' in freq:
+    if freq in ('qid', 'q.i.d', 'four times') or 'four' in freq or '4 times' in freq:
         return ["08:00", "12:00", "16:00", "20:00"]
-    elif 'once' in freq or '1 time' in freq or 'morning' in freq or 'daily' in freq:
-        return ["08:00"]
-    elif 'bedtime' in freq or 'night' in freq or 'evening' in freq:
+    if freq in ('sos', 'prn', 'p.r.n'):
+        return ["08:00"]  # as-needed: schedule morning slot as placeholder
+    if freq in ('hs', 'h.s') or 'bedtime' in freq or 'night' in freq:
         return ["21:00"]
+    # OD = once daily; also catches 'od', 'o.d', 'once daily', 'morning', 'daily'
+    if freq in ('od', 'o.d') or 'once' in freq or '1 time' in freq or 'morning' in freq or 'daily' in freq:
+        return ["08:00"]
+    if 'evening' in freq:
+        return ["18:00"]
     return ["08:00"]
 
 def extract_medications_nlp(text):
+    """Extract structured medication details from free text.
+    Used by BOTH the voice-transcription flow AND the prescription OCR flow.
+    Supports English phrases and Indian doctor shorthand (OD, BD, TDS, 1-0-1, AC, PC, HS).
+    """
     if not text:
         return []
 
-    dosage_pattern = re.compile(r'(\d+(?:\.\d+)?\s*(?:mg|g|ml|mcg|tablet|tablets|capsule|capsules|puff|puffs|drop|drops))', re.IGNORECASE)
-    frequency_pattern = re.compile(r'(once\s+daily|twice\s+daily|three\s+times\s+a\s+day|thrice\s+daily|twice\s+a\s+day|once\s+a\s+day|every\s+\d+\s+hours|at\s+bedtime|every\s+morning|every\s+evening)', re.IGNORECASE)
-    food_pattern = re.compile(r'(after\s+food|after\s+meals|before\s+food|before\s+meals|with\s+food|with\s+meals|empty\s+stomach)', re.IGNORECASE)
+    # ---- Dosage patterns ----
+    dosage_pattern = re.compile(
+        r'(\d+(?:\.\d+)?\s*(?:mg|g|ml|mcg|tablet|tablets|cap|caps|capsule|capsules|puff|puffs|drop|drops|units?|iu))',
+        re.IGNORECASE
+    )
+
+    # ---- Frequency patterns (English + Indian shorthand) ----
+    frequency_pattern = re.compile(
+        r'('
+        # English phrases
+        r'once\s+daily|twice\s+daily|three\s+times\s+a\s+day|thrice\s+daily'
+        r'|twice\s+a\s+day|once\s+a\s+day|every\s+\d+\s+hours?'
+        r'|at\s+bedtime|every\s+morning|every\s+evening'
+        # Indian frequency abbreviations (word boundary important)
+        r'|\bOD\b|\bBD\b|\bBID\b|\bTDS\b|\bTID\b|\bQID\b|\bSOS\b|\bPRN\b|\bHS\b'
+        # Dash-pattern: 1-0-1, 1-1-1, 0-0-1, 1-0-0, 1-1-0, 0-1-1, 0-1-0
+        r'|\b[01]-[01]-[01]\b'
+        r')',
+        re.IGNORECASE
+    )
+
+    # ---- Food/timing patterns (English + Indian AC/PC/HS) ----
+    food_pattern = re.compile(
+        r'('
+        r'after\s+food|after\s+meals?|before\s+food|before\s+meals?'
+        r'|with\s+food|with\s+meals?|empty\s+stomach|on\s+empty\s+stomach'
+        # Indian abbreviations
+        r'|\bAC\b|\bPC\b'
+        r')',
+        re.IGNORECASE
+    )
+
     duration_pattern = re.compile(r'(\d+\s*(?:days?|weeks?|months?))', re.IGNORECASE)
 
-    stopwords = {'take', 'this', 'tablet', 'tablets', 'capsule', 'capsules', 'medicine', 'medication', 'doctor', 'instruction', 'instructions', 'patient', 'daily', 'twice', 'thrice', 'once', 'after', 'before', 'food', 'meal', 'meals', 'days', 'weeks', 'every', 'hours', 'with', 'water', 'morning', 'evening', 'night', 'for', 'the', 'and', 'should', 'have', 'please', 'you', 'need', 'to', 'or', 'start'}
+    stopwords = {
+        'take', 'this', 'tablet', 'tablets', 'cap', 'caps', 'capsule', 'capsules',
+        'medicine', 'medication', 'doctor', 'instruction', 'instructions', 'patient',
+        'daily', 'twice', 'thrice', 'once', 'after', 'before', 'food', 'meal', 'meals',
+        'days', 'weeks', 'every', 'hours', 'with', 'water', 'morning', 'evening',
+        'night', 'for', 'the', 'and', 'should', 'have', 'please', 'you', 'need',
+        'to', 'or', 'start', 'od', 'bd', 'tds', 'qid', 'sos', 'prn', 'hs', 'ac', 'pc'
+    }
 
     found_meds = []
-    matches = list(re.finditer(r'([A-Za-z0-9\-\s]{2,25}?)\s+(\d+(?:\.\d+)?\s*(?:mg|g|ml|mcg|tablet|tablets|capsule|capsules|puff|puffs|drop|drops))', text, re.IGNORECASE))
+    matches = list(re.finditer(
+        r'([A-Za-z][A-Za-z0-9\-\s]{1,30}?)\s+(\d+(?:\.\d+)?\s*(?:mg|g|ml|mcg|tablet|tablets|cap|caps|capsule|capsules|puff|puffs|drop|drops|units?|iu))',
+        text, re.IGNORECASE
+    ))
 
     if not matches:
         freq_m = frequency_pattern.search(text)
@@ -1290,12 +1622,13 @@ def extract_medications_nlp(text):
 
         if freq_m or food_m or dur_m:
             freq_str = freq_m.group(1).lower() if freq_m else ""
+            food_str = _normalize_food(food_m.group(1) if food_m else "")
             found_meds.append({
-                "medicine_name": "", # Keep empty for confirmation
+                "medicine_name": "",  # empty — user must fill in
                 "dosage": "",
                 "frequency": freq_str,
                 "intake_times": get_intake_times_from_freq(freq_str),
-                "food_instruction": food_m.group(1).lower() if food_m else "",
+                "food_instruction": food_str,
                 "duration": dur_m.group(1).lower() if dur_m else "",
                 "start_date": "",
                 "end_date": "",
@@ -1306,7 +1639,10 @@ def extract_medications_nlp(text):
         for m in matches:
             raw_name = m.group(1).strip()
             dosage = m.group(2).strip()
-            clean_name = re.sub(r'^(take|prescribe|prescribed|give|use|start|having|administer)\s+', '', raw_name, flags=re.IGNORECASE).strip()
+            clean_name = re.sub(
+                r'^(take|prescribe|prescribed|give|use|start|having|administer|rx)\s+',
+                '', raw_name, flags=re.IGNORECASE
+            ).strip()
             words = clean_name.split()
             if len(words) > 3:
                 clean_name = " ".join([w for w in words if w.lower() not in stopwords][-2:])
@@ -1314,14 +1650,15 @@ def extract_medications_nlp(text):
                 clean_name = ""
 
             start, end = m.start(), m.end()
-            context = text[max(0, start - 30):min(len(text), end + 60)]
+            # Expand context window to catch Indian shorthand that often appears right after dosage
+            context = text[max(0, start - 40):min(len(text), end + 80)]
 
             freq_m = frequency_pattern.search(context)
             food_m = food_pattern.search(context)
             dur_m = duration_pattern.search(context)
 
             freq_str = freq_m.group(1).lower() if freq_m else ""
-            food_str = food_m.group(1).lower() if food_m else ""
+            food_str = _normalize_food(food_m.group(1) if food_m else "")
             dur_str = dur_m.group(1).lower() if dur_m else ""
 
             intake_times = get_intake_times_from_freq(freq_str)
@@ -1341,6 +1678,16 @@ def extract_medications_nlp(text):
             })
 
     return found_meds
+
+
+def _normalize_food(food_str: str) -> str:
+    """Normalize Indian food instruction abbreviations to readable strings."""
+    s = (food_str or "").strip()
+    mapping = {
+        'ac': 'before food',
+        'pc': 'after food',
+    }
+    return mapping.get(s.lower(), s.lower())
 
 def compute_next_scheduled_time(intake_times, current_dt=None):
     if not current_dt:
@@ -1390,6 +1737,15 @@ def save_voice_recording():
     }
     db.voice_transcriptions.insert_one(rec_doc)
     return jsonify(clean_doc(rec_doc)), 201
+
+@app.route('/api/voice-recordings', methods=['GET'])
+def get_voice_recordings():
+    """Return the patient's most recent voice transcriptions (for cross-check feature)."""
+    patient_id = get_patient_id_from_request(request)
+    db = get_db()
+    records = list(db.voice_transcriptions.find({'patient_id': patient_id}))
+    records.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+    return jsonify([clean_doc(r) for r in records[:5]])
 
 @app.route('/api/transcriptions', methods=['POST'])
 def save_transcription():

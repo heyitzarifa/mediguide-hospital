@@ -151,7 +151,7 @@ export const MedicationAssistant: React.FC = () => {
   const triggerBrowserNotification = (rem: MedicationReminderItem) => {
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
-        new Notification(`SmartCare Medication Reminder`, {
+        new Notification(`MediGuide Medication Reminder`, {
           body: `Time to take ${rem.medicine_name} (${rem.dosage}). ${rem.food_instruction || ''}`,
           icon: '/favicon.ico'
         });
@@ -394,7 +394,7 @@ export const MedicationAssistant: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 text-xs font-bold border border-teal-500/30 flex items-center gap-1">
               <Pill className="w-3.5 h-3.5 text-teal-400" />
-              SMARTCARE MEDICATION ASSISTANT
+              MEDIGUIDE MEDICATION ASSISTANT
             </span>
             <span className="text-xs text-slate-400 font-mono">STT + NLP + MongoDB</span>
           </div>
@@ -455,7 +455,7 @@ export const MedicationAssistant: React.FC = () => {
             <BellRing className="w-5 h-5 text-amber-400 flex-shrink-0" />
             <div>
               <strong className="block font-bold">Enable Desktop Reminders</strong>
-              <span>Grant browser notification permissions so SmartCare can trigger pops when medications are due.</span>
+              <span>Grant browser notification permissions so MediGuide can trigger pops when medications are due.</span>
             </div>
           </div>
           <button
@@ -474,7 +474,7 @@ export const MedicationAssistant: React.FC = () => {
             <span className="text-xs font-bold text-teal-400 uppercase tracking-wider block">Screen 1</span>
             <h3 className="text-xl font-bold text-white">Record Doctor Instructions</h3>
             <p className="text-xs text-slate-400">
-              Press record before your doctor starts speaking. SmartCare speech-to-text converts oral guidance into accurate text.
+              Press record before your doctor starts speaking. MediGuide speech-to-text converts oral guidance into accurate text.
             </p>
           </div>
 

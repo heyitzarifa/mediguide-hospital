@@ -322,7 +322,7 @@ export const ManagementDashboardPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <a
                       href={SmartCareAPI.getHospitalQRUrl(selectedHospitalQr.id)}
-                      download={`SmartCare_QR_${selectedHospitalQr.id}.png`}
+                      download={`MediGuide_QR_${selectedHospitalQr.id}.png`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"

@@ -37,7 +37,7 @@ export const PatientDashboardPage: React.FC<PatientDashboardPageProps> = ({ onTa
 
   const [aiQuery, setAiQuery] = useState('');
   const [aiChat, setAiChat] = useState<{ role: 'user' | 'ai'; text: string }[]>([
-    { role: 'ai', text: 'Hello! I am your SmartCare Patient Assistant. How can I help with your OPD visit, medications, or navigation today?' }
+    { role: 'ai', text: 'Hello! I am your MediGuide Patient Assistant. How can I help with your OPD visit, medications, or navigation today?' }
   ]);
 
   const fetchPatientData = async () => {
@@ -358,7 +358,7 @@ export const PatientDashboardPage: React.FC<PatientDashboardPageProps> = ({ onTa
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4 max-w-2xl mx-auto">
           <h3 className="text-base font-bold text-white border-b border-slate-800 pb-3 flex items-center gap-2">
             <Bot className="w-5 h-5 text-emerald-400" />
-            <span>SmartCare AI Patient Assistant</span>
+            <span>MediGuide AI Patient Assistant</span>
           </h3>
 
           <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
@@ -366,7 +366,7 @@ export const PatientDashboardPage: React.FC<PatientDashboardPageProps> = ({ onTa
               <div key={i} className={`p-3.5 rounded-2xl text-xs ${
                 c.role === 'user' ? 'bg-emerald-950/60 border border-emerald-800 text-emerald-200 ml-8' : 'bg-slate-950 border border-slate-800 text-slate-200 mr-8'
               }`}>
-                <strong className="block text-[10px] text-slate-400 uppercase font-mono mb-1">{c.role === 'user' ? 'You' : 'SmartCare AI'}</strong>
+                <strong className="block text-[10px] text-slate-400 uppercase font-mono mb-1">{c.role === 'user' ? 'You' : 'MediGuide AI'}</strong>
                 <p>{c.text}</p>
               </div>
             ))}

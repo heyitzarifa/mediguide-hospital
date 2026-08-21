@@ -13,23 +13,54 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ currentTab, onTabChange, onEmergencyClick, onOpenAuth }) => {
   const { user, isAuthenticated, logout } = useAuth();
 
-  const navItems: { id: AppViewTab; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'landing', label: 'Overview', icon: Home },
-    { id: 'navigation', label: 'Indoor Navigation', icon: Compass },
-    { id: 'queue', label: 'Queue Prediction', icon: Clock },
-    { id: 'prescription', label: 'Prescription Reader', icon: FileText },
-  ];
+  // ─── Role-gated nav config ────────────────────────────────────────────────────
+  // "Overview" tab only appears when the user is NOT authenticated (public landing).
+  // Each authenticated role sees only the tabs relevant to their workflow.
+  const navItems: { id: AppViewTab; label: string; icon: React.FC<{ className?: string }> }[] = (() => {
+    // Not logged in — show the full public nav (Overview + feature tabs)
+    if (!isAuthenticated || !user) {
+      return [
+        { id: 'landing',       label: 'Overview',           icon: Home       },
+        { id: 'navigation',    label: 'Indoor Navigation',  icon: Compass    },
+        { id: 'queue',         label: 'Queue Prediction',   icon: Clock      },
+        { id: 'prescription',  label: 'Prescription Reader', icon: FileText  },
+      ];
+    }
 
-  // Dynamic role dashboard tab
-  if (user?.role === 'STAFF') {
-    navItems.push({ id: 'staff-dashboard', label: 'Staff Console', icon: Stethoscope });
-  } else if (user?.role === 'PATIENT') {
-    navItems.push({ id: 'patient-dashboard', label: 'My Patient Portal', icon: UserCheck });
-  } else if (user?.role === 'VISITOR') {
-    navItems.push({ id: 'visitor-dashboard', label: 'Visitor Guide', icon: Eye });
-  } else if (user?.role === 'MANAGEMENT') {
-    navItems.push({ id: 'management-dashboard', label: 'Management', icon: Building2 });
-  }
+    switch (user.role) {
+      case 'MANAGEMENT':
+        // Management has its own full sub-tab suite inside ManagementDashboardPage.
+        // No need to expose navigation/queue/prescription from the top nav.
+        return [
+          { id: 'management-dashboard', label: 'Management', icon: Building2 },
+        ];
+
+      case 'STAFF':
+        // Staff manages its own queue inside StaffDashboardPage — no separate Queue tab needed.
+        // Prescription Reader is not part of staff workflows.
+        return [
+          { id: 'navigation',      label: 'Indoor Navigation', icon: Compass    },
+          { id: 'staff-dashboard', label: 'Staff Console',     icon: Stethoscope },
+        ];
+
+      case 'VISITOR':
+        return [
+          { id: 'navigation',        label: 'Indoor Navigation', icon: Compass },
+          { id: 'visitor-dashboard', label: 'Visitor Guide',     icon: Eye     },
+        ];
+
+      case 'PATIENT':
+      default:
+        // Patient gets the full feature set (no Overview — that is a public landing page only).
+        return [
+          { id: 'navigation',         label: 'Indoor Navigation',  icon: Compass   },
+          { id: 'queue',              label: 'Queue Prediction',   icon: Clock     },
+          { id: 'prescription',       label: 'Prescription Reader', icon: FileText },
+          { id: 'patient-dashboard',  label: 'My Patient Portal',  icon: UserCheck },
+        ];
+    }
+  })();
+
 
   return (
     <header className="sticky top-0 z-40 bg-slate-900/95 text-white backdrop-blur-md border-b border-slate-800 shadow-lg">
@@ -45,7 +76,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onTabChange, onEmerg
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-xl tracking-tight text-white">Smart<span className="text-teal-400">Care</span></span>
+              <span className="font-bold text-xl tracking-tight text-white">Medi<span className="text-teal-400">Guide</span></span>
               <span className="bg-teal-500/20 text-teal-300 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-teal-500/30">
                 LIVE DB
               </span>

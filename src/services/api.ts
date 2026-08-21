@@ -359,35 +359,25 @@ export const SmartCareAPI = {
       const headers = getHeaders(token ? { 'Authorization': `Bearer ${token}` } : {});
       delete headers['Content-Type'];
 
+      // Send to backend — do NOT fall back to fake data on failure.
+      // The backend performs real OCR and returns the image as a base64 data URL.
+      let res: Response;
       try {
-        const res = await fetch(`${BASE_URL}/prescription/analyze`, {
+        res = await fetch(`${BASE_URL}/prescription/analyze`, {
           method: 'POST',
           headers,
           body: formData
         });
-        if (res.ok) return await res.json();
-      } catch (e) {
-        console.warn('Backend prescription upload analysis error:', e);
+      } catch (e: any) {
+        throw new Error('Unable to reach the server. Please check that the backend is running.');
       }
 
-      const fileUrl = URL.createObjectURL(imageSource);
-      return {
-        id: `rx-${Date.now()}`,
-        patient_id: 'u-patient-1',
-        imageUrl: fileUrl,
-        doctorName: 'Prescription Medical Slip',
-        patientName: 'Patient Document',
-        date: new Date().toISOString().split('T')[0],
-        ocrConfidence: 65,
-        medicines: [],
-        error_warning: 'Unable to confidently extract medicine information from this prescription. Please upload a clearer image or verify the prescription manually.',
-        aiExplanation: {
-          overview: 'Prescription slip uploaded. Unable to confidently detect dosage text from image buffer. Please verify manually with your doctor.',
-          keyTakeaways: ['Always verify medicine details with your pharmacist.'],
-          lifestyleAdvice: ['Follow prescribed dietary guidelines carefully.']
-        },
-        safetyDisclaimer: 'AI/OCR extracted — verify with your doctor/pharmacist.'
-      };
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Prescription analysis failed (HTTP ${res.status})`);
+      }
+
+      return await res.json();
     } else {
       try {
         const res = await fetch(`${BASE_URL}/prescription/analyze`, {
@@ -773,6 +763,55 @@ export const SmartCareAPI = {
     return await res.json();
   },
 
+  /**
+   * POST /medications/extract — OCR variant (reuses the same NLP endpoint as voice flow).
+   * Browser does OCR → sends raw text here → backend extract_medications_nlp runs.
+   * This is intentionally an alias so both flows share one extraction function.
+   */
+  async extractMedicationsFromOcr(
+    rawOcrText: string,
+    token?: string | null
+  ): Promise<{ transcription_text: string; medications: ExtractedMedicationDetail[]; extracted_count: number }> {
+    const res = await fetch(`${BASE_URL}/medications/extract`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ transcription_text: rawOcrText })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to extract medications from OCR text');
+    }
+    return await res.json();
+  },
+
+  /**
+   * GET /api/voice-recordings — fetch the patient's latest voice transcription text.
+   * Used to populate the cross-check feature after OCR is complete.
+   * Returns empty string if no transcription exists yet.
+   */
+  async getLatestVoiceTranscription(token?: string | null): Promise<string> {
+    try {
+      const res = await fetch(`${BASE_URL}/voice-recordings`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // The endpoint returns an array sorted by created_at desc
+        if (Array.isArray(data) && data.length > 0) {
+          return data[0]?.transcription_text || '';
+        }
+        // Some backends return a single object
+        if (data?.transcription_text) return data.transcription_text;
+      }
+    } catch (e) {
+      console.warn('getLatestVoiceTranscription fallback:', e);
+    }
+    return '';
+  },
+
   /** POST /medications/confirm */
   async confirmMedications(medications: ExtractedMedicationDetail[], token?: string | null): Promise<{ confirmed_medications: MedicationRecordItem[]; created_reminders: MedicationReminderItem[] }> {
     const res = await fetch(`${BASE_URL}/medications/confirm`, {
@@ -786,6 +825,38 @@ export const SmartCareAPI = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to confirm medication schedule');
+    }
+    return await res.json();
+  },
+
+  /**
+   * POST /medications/cross-check
+   * Compare OCR-extracted medicines against a voice transcription.
+   * Returns { status, matches[], warnings[] }.
+   */
+  async crossCheckMedicines(
+    ocrMedicines: { name: string; dosage?: string; frequency?: string }[],
+    voiceTranscription: string,
+    token?: string | null
+  ): Promise<{
+    status: string;
+    matches: { medicine: string; message: string }[];
+    warnings: { medicine: string; type?: string; message: string }[];
+  }> {
+    const res = await fetch(`${BASE_URL}/medications/cross-check`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        ocrMedicines,
+        voiceTranscription
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Cross-check failed');
     }
     return await res.json();
   },
@@ -903,7 +974,7 @@ export const SmartCareAPI = {
         return {
           id: `msg-${Date.now()}`,
           sender: 'assistant',
-          text: data.text || data.message || 'I am ready to help you navigate SmartCare.',
+          text: data.text || data.message || 'I am ready to help you navigate MediGuide.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           action: data.action,
           cardData: data.cardData
@@ -923,7 +994,7 @@ export const SmartCareAPI = {
       return {
         id: `msg-${Date.now()}`,
         sender: 'assistant',
-        text: `Hi there! 👋 I'm your SmartCare assistant for ${hosp.name}. How can I help your hospital visit today? 😊`,
+        text: `Hi there! 👋 I'm MediGuide AI for ${hosp.name}. How can I help your hospital visit today? 😊`,
         timestamp
       };
     }
@@ -1220,8 +1291,8 @@ export const SmartCareAPI = {
 
     // Natural variations for unknown/out-of-scope queries
     const unknownVariations = [
-      `I'm mainly here to help with your hospital visit 😊 I can help with appointments, directions, queue status, or prescriptions.`,
-      `I'm not able to check that information right now, but I can definitely help you with SmartCare services at ${hosp.name}.`,
+      `I'm mainly here to help with your hospital visit 😊 I can help with appointments, directions, queue status, or prescriptions. — MediGuide AI at ${hosp.name}`,
+      `I'm not able to check that information right now, but I can definitely help you with MediGuide services at ${hosp.name}.`,
       `I'm not sure about that one, but no worries — I can help you find a department, check your appointment, or look up your queue!`
     ];
     const randomIndex = Math.floor(Math.random() * unknownVariations.length);

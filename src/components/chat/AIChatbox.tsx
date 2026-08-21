@@ -7,7 +7,7 @@ import {
 import type { AppViewTab, UserRole, ChatMessage, ChatAction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { SmartCareAPI } from '../../services/api';
-import { MOCK_HOSPITALS } from '../../data/mockData';
+import { MOCK_LOCATIONS, MOCK_HOSPITALS } from '../../data/mockData';
 
 interface AIChatboxProps {
   onNavigateToTab: (tab: AppViewTab, options?: { destinationId?: string; openBookingModal?: boolean; departmentName?: string }) => void;
@@ -15,12 +15,65 @@ interface AIChatboxProps {
   onHospitalChange?: (hospId: string) => void;
 }
 
+// ─── Intent detection ──────────────────────────────────────────────────────────
+type Intent =
+  | 'navigation'
+  | 'appointment'
+  | 'queue'
+  | 'prescription'
+  | 'greeting'
+  | 'thanks'
+  | 'safety'
+  | 'booking'
+  | 'visitor'
+  | 'staff_workflow'
+  | 'management'
+  | 'unknown';
+
+function detectIntent(q: string): Intent {
+  const t = q.toLowerCase().trim();
+  if (t === 'hi' || t === 'hello' || t === 'hey' || t.startsWith('hi ') || t.startsWith('hello ')) return 'greeting';
+  if (t.includes('thank') || t.includes('great') || t.includes('awesome')) return 'thanks';
+  if (t.includes('diagnose') || t.includes('stop taking') || t.includes('change dose') || t.includes('side effect')) return 'safety';
+  if (t.includes('book') || t.includes('reserve') || t.includes('schedule appointment') || t.includes('cardiologist') || t.includes('neurologist')) return 'booking';
+  if (t.includes('prescription') || t.includes('medicine') || t.includes('dose') || t.includes('scan') || t.includes('explain') || t.includes('pill') || t.includes('drug')) return 'prescription';
+  if (t.includes('queue') || t.includes('token') || t.includes('ahead') || t.includes('wait') || t.includes('how long') || t.includes('line')) return 'queue';
+  if (t.includes('appointment') || t.includes('my doctor') || t.includes('who is my doctor') || t.includes('dr.') || t.includes('when is my') || t.includes('consultation')) return 'appointment';
+  if (t.includes('where') || t.includes('route') || t.includes('direction') || t.includes('go to') || t.includes('find') || t.includes('show me') || t.includes('cardio') || t.includes('neuro') || t.includes('er') || t.includes('emergency') || t.includes('pharmacy') || t.includes('lab') || t.includes('ortho') || t.includes('pedia') || t.includes('radio') || t.includes('icu') || t.includes('cafe') || t.includes('restroom') || t.includes('navigation')) return 'navigation';
+  if (t.includes('visiting') || t.includes('visiting hours') || t.includes('parking') || t.includes('wifi') || t.includes('visitor') || t.includes('cafeteria')) return 'visitor';
+  if (t.includes('reception') || t.includes('checkin') || t.includes('call next') || t.includes('availability')) return 'staff_workflow';
+  if (t.includes('summary') || t.includes('utilization') || t.includes('stats') || t.includes('capacity')) return 'management';
+  return 'unknown';
+}
+
+// ─── Location match from query ─────────────────────────────────────────────────
+function matchLocation(q: string) {
+  const t = q.toLowerCase();
+  return (
+    MOCK_LOCATIONS.find(l =>
+      t.includes(l.name.toLowerCase()) ||
+      t.includes(l.category.toLowerCase()) ||
+      (t.includes('cardio') && l.category === 'Cardiology') ||
+      (t.includes('neuro') && l.category === 'Neurology') ||
+      ((t.includes('emergency') || t.includes(' er ') || t.includes('trauma')) && l.category === 'Emergency') ||
+      (t.includes('pharmacy') && l.category === 'Pharmacy') ||
+      ((t.includes('lab') || t.includes('blood')) && l.category === 'Laboratory') ||
+      (t.includes('ortho') && l.category === 'Orthopedics') ||
+      (t.includes('pedia') && l.category === 'Pediatrics') ||
+      (t.includes('radio') || (t.includes('mri') || t.includes('xray') || t.includes('x-ray'))) && l.category === 'Radiology' ||
+      (t.includes('icu') && l.category === 'ICU') ||
+      ((t.includes('cafe') || t.includes('food') || t.includes('dining')) && l.category === 'Cafeteria') ||
+      (t.includes('restroom') && l.category === 'Restroom')
+    ) || MOCK_LOCATIONS.find(l => l.category === 'Cardiology') // default fallback
+  );
+}
+
 export const AIChatbox: React.FC<AIChatboxProps> = ({ 
   onNavigateToTab, 
   activeHospitalId = 'hosp-main',
   onHospitalChange 
 }) => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const role: UserRole = user?.role || 'PATIENT';
 
   const [isOpen, setIsOpen] = useState(false);
@@ -37,17 +90,17 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
     switch (currentRole) {
       case 'STAFF':
         return [
-          "Create an appointment",
           "Show today's queue",
           "Check doctor availability",
-          "Receptionist workflow"
+          "Receptionist workflow",
+          "Create an appointment"
         ];
       case 'MANAGEMENT':
         return [
-          "Show today's appointments",
+          "Hospital operational summary",
           "Show queue statistics",
           "Show doctor availability",
-          "Hospital operational summary"
+          "Show today's appointments"
         ];
       case 'VISITOR':
         return [
@@ -59,9 +112,9 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
       case 'PATIENT':
       default:
         return [
-          "Book an appointment",
           "Where is Cardiology?",
-          "What's my queue status?",
+          "What is my token number?",
+          "When is my appointment?",
           "Explain my prescription"
         ];
     }
@@ -70,7 +123,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
   // Generate initial welcome message when opened or role/hospital changes
   const initWelcomeMessage = (currentRole: UserRole, hospName: string): ChatMessage => {
     let roleText = "How can I assist your visit today? 😊";
-    if (currentRole === 'PATIENT') roleText = "I can help you book an OPD appointment, navigate to departments, check your live queue token, or explain prescriptions!";
+    if (currentRole === 'PATIENT') roleText = "Ask me where to go, your token number, appointment time, doctor's name, or to explain your prescription!";
     if (currentRole === 'STAFF') roleText = "I can assist you with live OPD queue updates, patient appointments, and receptionist workflows.";
     if (currentRole === 'MANAGEMENT') roleText = "I can provide real-time hospital occupancy analytics, doctor utilization rates, and queue statistics.";
     if (currentRole === 'VISITOR') roleText = "I can help you find departments, cafeteria & parking locations, and check visiting hours.";
@@ -78,7 +131,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
     return {
       id: 'welcome-msg',
       sender: 'assistant',
-      text: `Hi there! 👋 I am your SmartCare Assistant for **${hospName}**.\n${roleText}`,
+      text: `Hi there! 👋 I'm **MediGuide AI** for **${hospName}**.\n${roleText}`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
   };
@@ -99,6 +152,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // ─── Core send handler — tries live data first, then generic backend ──────────
   const handleSendQuery = async (queryText?: string) => {
     const textToSend = (queryText || inputQuery).trim();
     if (!textToSend || isTyping) return;
@@ -115,11 +169,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
     setIsTyping(true);
 
     try {
-      const responseMsg = await SmartCareAPI.sendChatMessage(
-        textToSend,
-        role,
-        selectedHospitalId
-      );
+      const responseMsg = await buildSmartResponse(textToSend);
       setMessages(prev => [...prev, responseMsg]);
     } catch (err) {
       setMessages(prev => [
@@ -127,7 +177,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
         {
           id: `err-${Date.now()}`,
           sender: 'assistant',
-          text: "I experienced a temporary network issue. Please try again or click below to browse features directly.",
+          text: "I experienced a temporary issue. Please try again or browse features directly.",
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           action: {
             type: 'navigate',
@@ -139,6 +189,295 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
     } finally {
       setIsTyping(false);
     }
+  };
+
+  // ─── Smart response builder — fetches real data before falling back ───────────
+  const buildSmartResponse = async (query: string): Promise<ChatMessage> => {
+    const intent = detectIntent(query);
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const hosp = activeHospital;
+
+    // ── NAVIGATION: fetch real location match ──
+    if (intent === 'navigation') {
+      // Try live search first
+      let loc = null;
+      try {
+        const results = await SmartCareAPI.searchLocations(query);
+        loc = results[0] || null;
+      } catch (_) {}
+      if (!loc) loc = matchLocation(query);
+
+      if (loc) {
+        return {
+          id: `msg-${Date.now()}`,
+          sender: 'assistant',
+          text: `📍 **${loc.name}** is on **${loc.floorName}** (Room ${loc.roomNumber}).\n${loc.description}\n\nWould you like me to show you the turn-by-turn route?`,
+          timestamp: ts,
+          action: {
+            type: 'navigate',
+            label: '🗺️ Show Navigation Route',
+            payload: { destinationId: loc.id, tab: 'navigation' }
+          },
+          cardData: {
+            title: loc.name,
+            subtitle: `${loc.floorName} • Room ${loc.roomNumber}`,
+            details: [
+              { label: 'Category', value: loc.category },
+              { label: 'Floor', value: loc.floorName },
+              { label: 'Room', value: loc.roomNumber },
+              { label: 'Hospital', value: hosp.name }
+            ]
+          }
+        };
+      }
+    }
+
+    // ── APPOINTMENT: fetch real patient appointments ──
+    if (intent === 'appointment') {
+      if (role === 'PATIENT') {
+        try {
+          const apts = await SmartCareAPI.getPatientAppointments(token);
+          if (apts && apts.length > 0) {
+            // Find the next upcoming/confirmed appointment
+            const upcoming = apts.find(a =>
+              a.status === 'confirmed' || a.status === 'scheduled' || a.status === 'booked'
+            ) || apts[0];
+            return {
+              id: `msg-${Date.now()}`,
+              sender: 'assistant',
+              text: `📅 Your appointment is with **${upcoming.doctor_name}** (${upcoming.department_name}) on **${upcoming.appointment_date}** at **${upcoming.appointment_time}**.\n\nStatus: ${(upcoming.status || 'Scheduled').toUpperCase()}`,
+              timestamp: ts,
+              action: {
+                type: 'view_appointment',
+                label: '📋 View Appointment',
+                payload: { tab: 'patient' }
+              },
+              cardData: {
+                title: upcoming.doctor_name || 'Your Doctor',
+                subtitle: upcoming.department_name || 'Department',
+                details: [
+                  { label: 'Date', value: upcoming.appointment_date || '—' },
+                  { label: 'Time', value: upcoming.appointment_time || '—' },
+                  { label: 'Status', value: upcoming.status?.toUpperCase() || 'Scheduled' },
+                  { label: 'Token', value: upcoming.token_number ? `#${upcoming.token_number}` : 'Not assigned yet' }
+                ]
+              }
+            };
+          } else {
+            return {
+              id: `msg-${Date.now()}`,
+              sender: 'assistant',
+              text: `You don't have any upcoming appointments at ${hosp.name}. Would you like to book one?`,
+              timestamp: ts,
+              action: {
+                type: 'book_appointment',
+                label: '📅 Book an Appointment',
+                payload: { tab: 'patient', openBookingModal: true, departmentName: 'Cardiology' }
+              }
+            };
+          }
+        } catch (_) {
+          // fallback to generic
+        }
+      }
+      // Non-patient roles → fall through to generic backend
+    }
+
+    // ── QUEUE / TOKEN: fetch real queue prediction ──
+    if (intent === 'queue') {
+      if (role === 'PATIENT') {
+        try {
+          // Get patient's appointment dept first
+          const apts = await SmartCareAPI.getPatientAppointments(token);
+          const dept = (apts && apts.length > 0) ? apts[0].department_name || 'Cardiology' : 'Cardiology';
+          const queue = await SmartCareAPI.getQueuePrediction(dept);
+          const tokenNum = (apts && apts.length > 0 && apts[0].token_number) ? `#${apts[0].token_number}` : 'Not assigned yet';
+          const ahead = queue.currentToken && tokenNum !== 'Not assigned yet'
+            ? Math.max(0, parseInt(tokenNum.replace('#', ''), 10) - parseInt(String(queue.currentToken).replace('#', '').replace('A-', '').replace('B-', ''), 10))
+            : queue.patientsAhead ?? '—';
+          const eta = queue.estimatedWaitMinutes ?? '—';
+
+          return {
+            id: `msg-${Date.now()}`,
+            sender: 'assistant',
+            text: `🎫 **${dept} OPD Queue**\n\nYour token: **${tokenNum}**\nCurrent serving: **${queue.currentToken || '—'}**\nPatients ahead: **${ahead}**\nEstimated wait: **${eta} minutes**`,
+            timestamp: ts,
+            action: {
+              type: 'view_queue',
+              label: '📊 View Live Queue',
+              payload: { tab: 'queue' }
+            },
+            cardData: {
+              title: `${dept} OPD Queue`,
+              subtitle: `Your Token: ${tokenNum}`,
+              details: [
+                { label: 'Your Token', value: tokenNum },
+                { label: 'Current Token', value: String(queue.currentToken || '—') },
+                { label: 'Patients Ahead', value: String(ahead) },
+                { label: 'Est. Wait', value: `${eta} min` }
+              ]
+            }
+          };
+        } catch (_) {
+          // fallback to generic
+        }
+      }
+    }
+
+    // ── PRESCRIPTION ──
+    if (intent === 'prescription') {
+      return {
+        id: `msg-${Date.now()}`,
+        sender: 'assistant',
+        text: `📄 You can upload or photograph your prescription and MediGuide AI will:\n• Extract medicine names, dosages & schedules\n• Explain each medicine in plain language\n• Set medication reminders for you\n\nTap below to open the Prescription Reader.`,
+        timestamp: ts,
+        action: {
+          type: 'scan_prescription',
+          label: '📷 Open Prescription Reader',
+          payload: { tab: 'prescription' }
+        },
+        cardData: {
+          title: 'AI Prescription Reader',
+          subtitle: 'OCR + Plain Language Explainer',
+          details: [
+            { label: 'Supports', value: 'JPG, PNG, Camera' },
+            { label: 'Languages', value: 'English + Indian shorthand' }
+          ]
+        }
+      };
+    }
+
+    // ── GREETING ──
+    if (intent === 'greeting') {
+      return {
+        id: `msg-${Date.now()}`,
+        sender: 'assistant',
+        text: `Hi there! 👋 I'm MediGuide AI for **${hosp.name}**. I can help you:\n• 🗺️ Find any department\n• 📅 Check your appointment\n• 🎫 Check your token & wait time\n• 📄 Read your prescription\n\nWhat do you need?`,
+        timestamp: ts
+      };
+    }
+
+    // ── THANKS ──
+    if (intent === 'thanks') {
+      return {
+        id: `msg-${Date.now()}`,
+        sender: 'assistant',
+        text: `You're very welcome! 😊 Wishing you great health. Let me know if you need anything else.`,
+        timestamp: ts
+      };
+    }
+
+    // ── SAFETY DISCLAIMER ──
+    if (intent === 'safety') {
+      return {
+        id: `msg-${Date.now()}`,
+        sender: 'assistant',
+        text: `I'm not able to make medical decisions — please consult your doctor or pharmacist. I can help explain information already on your prescription.`,
+        timestamp: ts,
+        action: {
+          type: 'scan_prescription',
+          label: '📷 Scan Prescription',
+          payload: { tab: 'prescription' }
+        }
+      };
+    }
+
+    // ── BOOKING ──
+    if (intent === 'booking') {
+      const q = query.toLowerCase();
+      let dept = 'Cardiology';
+      if (q.includes('neuro')) dept = 'Neurology';
+      if (q.includes('ortho')) dept = 'Orthopedics';
+      if (q.includes('pedia')) dept = 'Pediatrics';
+      if (q.includes('emergency')) dept = 'Emergency';
+      return {
+        id: `msg-${Date.now()}`,
+        sender: 'assistant',
+        text: `Sure! 😊 Let's book your **${dept}** appointment at ${hosp.name}. Click below to open the booking form.`,
+        timestamp: ts,
+        action: {
+          type: 'book_appointment',
+          label: '📅 Book Appointment',
+          payload: { tab: 'patient', openBookingModal: true, departmentName: dept }
+        },
+        cardData: {
+          title: `Book ${dept} OPD`,
+          subtitle: hosp.name,
+          details: [
+            { label: 'Department', value: dept },
+            { label: 'Hospital', value: hosp.name },
+            { label: 'Mode', value: 'Step-by-step Wizard' }
+          ]
+        }
+      };
+    }
+
+    // ── VISITOR ──
+    if (intent === 'visitor') {
+      try {
+        const info = await SmartCareAPI.getVisitorInfo();
+        return {
+          id: `msg-${Date.now()}`,
+          sender: 'assistant',
+          text: `🏥 **Visitor Information — ${hosp.name}**\n\n⏰ Visiting hours: ${info.visitingHours}\n🚗 Parking: ${info.parkingInfo}\n☕ Cafeteria: ${info.cafeteriaLocation}\n📶 WiFi: ${info.wifiDetails}`,
+          timestamp: ts,
+          action: {
+            type: 'view_visitor',
+            label: '👁️ Visitor Guide',
+            payload: { tab: 'visitor' }
+          }
+        };
+      } catch (_) {}
+    }
+
+    // ── STAFF WORKFLOW ──
+    if (intent === 'staff_workflow' && role === 'STAFF') {
+      return {
+        id: `msg-${Date.now()}`,
+        sender: 'assistant',
+        text: `Welcome to the Staff Workflow. You can call the next patient token, assign doctors, and update queue statuses in the Staff Console.`,
+        timestamp: ts,
+        action: {
+          type: 'view_staff',
+          label: 'Open Staff Console',
+          payload: { tab: 'staff' }
+        }
+      };
+    }
+
+    // ── MANAGEMENT ──
+    if (intent === 'management' && role === 'MANAGEMENT') {
+      return {
+        id: `msg-${Date.now()}`,
+        sender: 'assistant',
+        text: `Operational Summary for ${hosp.name}: Real-time analytics, doctor utilization, and queue data available in the Management Portal.`,
+        timestamp: ts,
+        action: {
+          type: 'view_management',
+          label: 'Open Management Portal',
+          payload: { tab: 'management' }
+        }
+      };
+    }
+
+    // ── GENERIC BACKEND FALLBACK (preserves existing /chat endpoint behavior) ──
+    try {
+      const responseMsg = await SmartCareAPI.sendChatMessage(
+        query,
+        role,
+        selectedHospitalId,
+        token
+      );
+      return responseMsg;
+    } catch (_) {}
+
+    // Final unknown fallback
+    return {
+      id: `msg-${Date.now()}`,
+      sender: 'assistant',
+      text: `I can help you with:\n• 🗺️ Finding departments (e.g. "Where is Cardiology?")\n• 🎫 Your token & wait time\n• 📅 Your appointment details\n• 📄 Reading your prescription\n\nWhat would you like to know?`,
+      timestamp: ts
+    };
   };
 
   const handleResetChat = () => {
@@ -166,7 +505,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
       {
         id: `hosp-switch-${Date.now()}`,
         sender: 'assistant',
-        text: `Switched context to **${targetHosp.name}** (ID: \`${targetHosp.id}\`). All doctors, appointments, live queues, and turn maps are now using ${targetHosp.name}'s data.`,
+        text: `Switched to **${targetHosp.name}**. All departments, appointments, queues, and navigation are now using ${targetHosp.name}'s data.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
     ]);
@@ -194,13 +533,13 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
         <button
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-full bg-gradient-to-r from-teal-500 via-emerald-500 to-cyan-500 text-slate-950 font-bold shadow-xl shadow-teal-500/30 hover:scale-105 active:scale-95 transition-all group border border-teal-300/40"
-          aria-label="Open AI Assistant"
+          aria-label="Open MediGuide AI"
         >
           <div className="relative">
             <Sparkles className="w-6 h-6 text-slate-950 group-hover:rotate-12 transition-transform" />
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-300 animate-ping" />
           </div>
-          <span className="text-sm font-extrabold tracking-wide hidden sm:inline text-slate-950">💬 SmartCare AI</span>
+          <span className="text-sm font-extrabold tracking-wide hidden sm:inline text-slate-950">💬 MediGuide AI</span>
         </button>
       )}
 
@@ -216,7 +555,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h3 className="font-bold text-sm text-white leading-tight">💬 SmartCare AI</h3>
+                  <h3 className="font-bold text-sm text-white leading-tight">💬 MediGuide AI</h3>
                   <span className="bg-teal-500/20 text-teal-300 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-teal-500/30">
                     ONLINE
                   </span>
@@ -330,7 +669,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
 
             {/* Typing Indicator */}
             {isTyping && (
-              <div className="flex items-center gap-2 text-slate-400 text-xs bg-slate-800/80 p-3 rounded-2xl w-28 border border-slate-700">
+              <div className="flex items-center gap-2 text-slate-400 text-xs bg-slate-800/80 p-3 rounded-2xl w-32 border border-slate-700">
                 <Bot className="w-4 h-4 text-teal-400 animate-spin" />
                 <span className="animate-pulse">Thinking...</span>
               </div>
@@ -364,7 +703,7 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({
               type="text"
               value={inputQuery}
               onChange={(e) => setInputQuery(e.target.value)}
-              placeholder={`Ask AI in ${role.toLowerCase()} context...`}
+              placeholder="Ask MediGuide AI anything..."
               className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 transition-colors"
             />
             <button
